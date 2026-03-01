@@ -1,0 +1,50 @@
+---
+title: "Untitled"
+format: html
+---
+
+```{python}
+import pandas as pd
+
+df = pd.read_csv("data/macro_merged_clean.csv", parse_dates=["date"]).set_index("date")
+
+# 1. Construct term spread
+
+df["termspread"] = df["gs10"] - df["tb3ms"]
+
+# 2. Lag features
+lags = [1, 3, 6]
+for col in ["unrate", "cpi", "indpro", "gs10", "tb3ms", "termspread"]:
+    for L in lags:
+        df[f"{col}_lag{L}"] = df[col].shift(L)
+
+
+# 3. Growth rates / changes
+
+df["unrate_change"] = df["unrate"].diff()
+df["indpro_growth"] = df["indpro"].pct_change()
+df["cpi_yoy"] = df["cpi"].pct_change(12)
+df["gs10_change"] = df["gs10"].diff()
+df["tb3ms_change"] = df["tb3ms"].diff()
+df["termspread_change"] = df["termspread"].diff()
+
+
+# 4. Moving averages
+
+for win in [3, 6]:
+    df[f"unrate_ma{win}"] = df["unrate"].rolling(win).mean()
+    df[f"indpro_ma{win}"] = df["indpro"].rolling(win).mean()
+
+
+# 5. Momentum features
+
+df["unrate_momentum"] = df["unrate"] - df["unrate_ma3"]
+df["indpro_momentum"] = df["indpro"] - df["indpro_ma3"]
+
+
+# Final clean dataset
+
+df_features = df.dropna()
+df_features.to_csv("data/macro_features.csv")
+
+```
