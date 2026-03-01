@@ -1,0 +1,93 @@
+---
+title: "Untitled"
+format: html
+---
+
+```{python}
+#Data load Part
+
+import pandas as pd
+from pathlib import Path
+
+
+BASE_PATH = Path("/Users/yuanyuan/Downloads/final_project/data")
+
+SERIES_FILES = {
+    "cpi":      "CPIAUCSL.csv",   #Consumer Price Index for All Urban Consumers
+    "gs10":     "GS10.csv",       #Market Yield on U.S. Treasury Securities at 10-Year Constant Maturity
+    "indpro":   "INDPRO.csv",     #Industrial Production
+    "tb3ms":    "TB3MS.csv",      #3-Month Treasury Bill Secondary Market Rate, Discount Basis
+    "unrate":   "UNRATE.csv",     #Unemployment Rate
+    "usrec":    "USREC.csv",      #NBER based Recession Indicators for the United States
+}
+
+
+def load_fred_series(file_name: str, new_col_name: str) -> pd.DataFrame:
+    
+    path = BASE_PATH / file_name
+    df = pd.read_csv(path)
+
+    # FRED colname：DATE or observation_date
+    if "observation_date" in df.columns:
+        date_col = "observation_date"
+    elif "DATE" in df.columns:
+        date_col = "DATE"
+    else:
+        raise ValueError(f"Cannot find date column in {file_name}")
+
+
+    value_cols = [c for c in df.columns if c != date_col]
+    if len(value_cols) != 1:
+        raise ValueError(f"Expected 1 value column in {file_name}, got {value_cols}")
+    value_col = value_cols[0]
+
+    # rename date
+    df[date_col] = pd.to_datetime(df[date_col])
+    df = (
+        df
+        .rename(columns={date_col: "date", value_col: new_col_name})
+        .set_index("date")
+        .sort_index()
+    )
+
+    # convert to numeric
+    df[new_col_name] = pd.to_numeric(df[new_col_name], errors="coerce")
+
+    return df
+
+
+dfs = []
+for col_name, file_name in SERIES_FILES.items():
+    tmp = load_fred_series(file_name, col_name)
+    dfs.append(tmp)
+
+
+macro = dfs[0]
+for tmp in dfs[1:]:
+    macro = macro.join(tmp, how="inner")
+
+
+
+
+print("Start dates:\n", macro.apply(lambda s: s.first_valid_index()))
+print("End dates:\n", macro.apply(lambda s: s.last_valid_index()))
+
+
+start_date = "1953-04-01"   # GS10 start date
+end_date   = "2026-01-01"   # all series end date
+macro = macro.loc[start_date:end_date]
+
+
+macro = macro.ffill().bfill()
+macro = macro.dropna()
+
+macro["usrec"] = macro["usrec"].astype(int)
+
+
+print(macro.head())
+print(macro.tail())
+print(macro.describe().T)
+
+macro.to_csv(BASE_PATH/"macro_merged_clean.csv")
+
+```
