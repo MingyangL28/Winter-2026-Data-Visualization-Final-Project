@@ -1,0 +1,159 @@
+---
+title: "Untitled"
+format: html
+---
+
+```{python}
+import os
+import re
+import glob
+import pandas as pd
+import plotly.express as px
+
+
+DATA_DIR = "state_ur"   
+CSV_PATTERN = "*.csv"
+
+COLOR_SCALE = "Turbo"
+
+# If True, enforce a fixed color range across months (recommended for comparability)
+USE_FIXED_COLOR_RANGE = True
+
+
+
+def extract_series_code_from_filename(fp: str) -> str | None:
+    """
+    Extract series code like 'CAUR', 'TXUR' from the filename.
+    Works with patterns like:
+      - CAUR.csv
+      - Unemployment Rate in California (CAUR).csv
+      - ..._CAUR_...csv
+    """
+    base = os.path.basename(fp).upper()
+    m = re.search(r"\b([A-Z]{2}UR)\b", base)  # Two-letter state abbrev + 'UR'
+    return m.group(1) if m else None
+
+def read_one_state_csv(fp: str) -> pd.DataFrame:
+    df = pd.read_csv(fp)
+
+    # Standardize date column name
+    if "observation_date" not in df.columns:
+        for cand in ["DATE", "date", "Date"]:
+            if cand in df.columns:
+                df = df.rename(columns={cand: "observation_date"})
+                break
+    if "observation_date" not in df.columns:
+        raise ValueError(f"Missing date column (expected 'observation_date' or 'DATE') in: {fp}")
+
+    # Identify the series code
+    series = extract_series_code_from_filename(fp)
+    if series is None:
+        # Try to detect 'XXUR' from column names
+        for c in df.columns:
+            cu = str(c).upper()
+            if re.fullmatch(r"[A-Z]{2}UR", cu):
+                series = cu
+                break
+
+    # Uppercase column names for robust matching
+    df.columns = [c.upper() for c in df.columns]
+
+    if series is None:
+        raise ValueError(f"Cannot identify series code (e.g., 'CAUR') from filename/columns: {fp}")
+    if series not in df.columns:
+        raise ValueError(f"Column '{series}' not found in file: {fp}")
+
+    out = df[["OBSERVATION_DATE", series]].copy()
+    out["OBSERVATION_DATE"] = pd.to_datetime(out["OBSERVATION_DATE"])
+    out = out.rename(columns={series: "unrate"})
+    out["state"] = series[:2]  # CAUR -> CA
+    return out
+
+# Batch load
+files = sorted(glob.glob(os.path.join(DATA_DIR, CSV_PATTERN)))
+if not files:
+    raise FileNotFoundError(f"No CSV files found in {DATA_DIR}. Please check the path/pattern.")
+
+dfs = []
+for fp in files:
+    try:
+        dfs.append(read_one_state_csv(fp))
+    except Exception as e:
+        print(f"[Skipped] {fp} -> {e}")
+
+df_long = pd.concat(dfs, ignore_index=True).dropna(subset=["unrate"])
+df_long["unrate"] = pd.to_numeric(df_long["unrate"], errors="coerce")
+df_long = df_long.dropna(subset=["unrate"])
+
+# Month label for animation / filtering
+df_long["month"] = df_long["OBSERVATION_DATE"].dt.to_period("M").astype(str)
+
+states_loaded = sorted(df_long["state"].unique())
+print("States loaded:", states_loaded)
+print("Date range:", df_long["OBSERVATION_DATE"].min(), "->", df_long["OBSERVATION_DATE"].max())
+
+# Compute a fixed color range (optional, but recommended)
+if USE_FIXED_COLOR_RANGE:
+    color_min = float(df_long["unrate"].quantile(0.02))
+    color_max = float(df_long["unrate"].quantile(0.98))
+else:
+    color_min, color_max = None, None
+
+
+def plot_state_map_for_month(month_str: str):
+    """
+    Plot one month choropleth map.
+    month_str: 'YYYY-MM' (e.g., '2020-04')
+    """
+    d = df_long[df_long["month"] == month_str].copy()
+    if d.empty:
+        sample_months = df_long["month"].drop_duplicates().sort_values().tail(8).tolist()
+        raise ValueError(f"No data found for month {month_str}. Example available months: {sample_months}")
+
+    fig = px.choropleth(
+        d,
+        locations="state",
+        locationmode="USA-states",
+        color="unrate",
+        scope="usa",
+        hover_name="state",
+        hover_data={"unrate": ":.1f", "month": True},
+        color_continuous_scale=COLOR_SCALE,
+        range_color=(color_min, color_max) if USE_FIXED_COLOR_RANGE else None,
+        title=f"State Unemployment Rate ({month_str})"
+    )
+    fig.update_layout(margin=dict(l=0, r=0, t=60, b=0))
+    fig.show()
+
+# Example:
+# plot_state_map_for_month("2020-04")
+
+
+def plot_state_map_animation():
+    """
+    Plot an animated choropleth over time (by month).
+    """
+    d = df_long.copy()
+
+    # Ensure chronological order in animation
+    month_order = sorted(d["month"].unique())
+    d["month"] = pd.Categorical(d["month"], categories=month_order, ordered=True)
+
+    fig = px.choropleth(
+        d,
+        locations="state",
+        locationmode="USA-states",
+        color="unrate",
+        animation_frame="month",
+        scope="usa",
+        hover_name="state",
+        hover_data={"unrate": ":.1f"},
+        color_continuous_scale=COLOR_SCALE,
+        range_color=(color_min, color_max) if USE_FIXED_COLOR_RANGE else None,
+        title="State Unemployment Rate (Monthly Animation)"
+    )
+    fig.update_layout(margin=dict(l=0, r=0, t=60, b=0))
+    fig.show()
+
+plot_state_map_animation()
+```
