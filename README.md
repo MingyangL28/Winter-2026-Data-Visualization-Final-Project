@@ -1,37 +1,31 @@
-# Fire Perimeter Analysis
+# 📈 Macroeconomic Unemployment Prediction Dashboard
 
-This project processes and visualizes historical fire perimeter data and Canadian CPI data.
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)]([这里填入你的 Streamlit 网页链接])
 
-## Setup
+## 📌 Project Overview
+This project explores the impact of macroeconomic indicators on the U.S. Unemployment Rate (UNRATE). By leveraging a **Gamma Generalized Linear Model (GLM)** and **SHAP (Shapley Additive exPlanations)** attribution analysis, this interactive dashboard predicts future unemployment trends and dynamically explains the economic intuition behind each predictor.
 
-```bash
-conda env create -f environment.yml
-conda activate fire_analysis
-```
+**👉 [Click here to view the Live Dashboard!]([这里填入你的 Streamlit 网页链接])**
 
-## Project Structure
+## ✨ Key Features
+* **Interactive SHAP Explainer:** Select different economic indicators (e.g., Term Spread, CPI, Industrial Production) to see how they positively or negatively drive the unemployment rate.
+* **Global Feature Importance:** A dynamic visualization of which macroeconomic variables contribute the most to the model's predictions.
+* **Real-time Prediction:** Forecasts the next period's unemployment rate based on the latest available macroeconomic data.
+* **Economic Intuition:** Built-in explanations mapping model coefficients to real-world economic theories (like the Phillips Curve and Yield Curve Inversions).
 
-```
-data/
-  raw-data/           # Raw data files
-    fire.csv          # Historical fire perimeter data
-    canadian_cpi.csv  # Canadian Consumer Price Index data
-  derived-data/       # Filtered data and output plots
-    fire_filtered.gpkg  # Fire data filtered to post-2015
-    cpi_filtered.csv    # CPI data filtered to 2020 onwards
-code/
-  preprocessing.py    # Filters fire and CPI data
-  plot_fires.py       # Plots fire perimeters
-```
+## 🛠️ Methodology & Data
+* **Data Source:** Federal Reserve Economic Data (FRED).
+* **Predictors:** * Term Spread (10Y - 3M Treasury Yields) & its lags.
+  * Industrial Production Growth & Momentum.
+  * CPI Year-over-Year (Inflation).
+  * Lagged Short-term and Long-term Interest Rates.
+* **Model:** Gamma GLM (Generalized Linear Model), chosen for its suitability with strictly positive, right-skewed continuous variables.
 
-## Usage
+## 🚀 How to Run Locally
 
-1. Run preprocessing to filter data:
+If you'd like to run this project on your local machine, follow these steps:
+
+1. **Clone the repository:**
    ```bash
-   python code/preprocessing.py
-   ```
-
-2. Generate the fire perimeter plot:
-   ```bash
-   python code/plot_fires.py
-   ```
+   git clone [https://github.com/your-username/final_project.git](https://github.com/your-username/final_project.git)
+   cd final_project
