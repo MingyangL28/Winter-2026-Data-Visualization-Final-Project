@@ -11,7 +11,7 @@ import streamlit as st
 st.set_page_config(page_title="State Unemployment Dashboard", layout="wide")
 
 st.title("US State Unemployment Rate Dashboard")
-st.caption("Monthly, seasonally adjusted. Data source: your downloaded FRED state series (e.g., CAUR, TXUR).")
+st.caption("Monthly, seasonally adjusted. Data source: Downloaded FRED state series (e.g., CAUR, TXUR).")
 
 # =========================
 # Settings (editable)
