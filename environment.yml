@@ -1,9 +1,17 @@
-name: fire_analysis
+name: unemployment_rate_forecast
 channels:
   - conda-forge
+  - defaults
 dependencies:
   - python=3.11
+  - streamlit
   - pandas
+  - plotly
   - geopandas
   - matplotlib
   - shapely
+  - numpy
+  - statsmodels
+  - scikit-learn
+  - scipy
+  - seaborn
