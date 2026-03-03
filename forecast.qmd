@@ -1,0 +1,406 @@
+---
+title: "Untitled"
+format: html
+---
+
+```{python}
+import pandas as pd
+import numpy as np
+from scipy import stats
+import statsmodels.api as sm
+import matplotlib.pyplot as plt
+from sklearn.metrics import confusion_matrix, classification_report, roc_auc_score, roc_curve
+import warnings
+
+warnings.filterwarnings('ignore')
+
+# In[ ]:
+
+
+# Load dataset
+
+df = pd.read_csv("data/macro_features.csv", parse_dates=["date"]).set_index("date")
+
+print("Dataset shape:", df.shape)
+print("Date range:", df.index.min(), "to", df.index.max())
+
+y = df["unrate"]
+print(f"\nTarget: UNRATE (Unemployment Rate)")
+print(f"Mean: {y.mean():.2f}%")
+print(f"Range: {y.min():.2f}% - {y.max():.2f}%")
+
+# In[4]:
+
+
+# Select candidate features for predicting unemployment rate
+# Remove unrate_momentum and unrate_change to avoid data leakage
+# removing these 2 as we can't use
+# unemployment-derived features to predict unemployment itself)
+candidate_features = [
+    "termspread",
+    "termspread_lag3",
+    "indpro_growth",
+    "indpro_momentum",
+    "cpi_yoy",
+    "tb3ms_lag6",
+    "gs10_lag6",
+]
+
+X = df[candidate_features].copy()
+print(f"Using {len(candidate_features)} candidate features")
+
+
+# In[5]:
+
+
+# Forward Selection:using AIC criterion for Gamma Regression
+def forward_selection(X, y, p_threshold=0.10):
+    remaining = list(X.columns)
+    selected = []
+
+    # Null model uses intercept only (baseline for comparison)
+    X_const = sm.add_constant(pd.DataFrame(index=X.index))
+    null_model = sm.GLM(y, X_const, family=sm.families.Gamma()).fit()
+    current_aic = null_model.aic
+
+    print("FORWARD SELECTION (AIC Criterion)")
+    print(f"Step 0: Null model | AIC = {current_aic:.2f}")
+
+    step = 0
+    while remaining:
+        step += 1
+        results = []
+
+        # one at a time for each remaining var
+        for candidate in remaining:
+            features = selected + [candidate]
+            X_try = sm.add_constant(X[features])
+            try:
+                model = sm.GLM(y, X_try, family=sm.families.Gamma()).fit()
+                p_val = model.pvalues[candidate]
+                results.append((candidate, model.aic, p_val))
+            except:
+                results.append((candidate, np.inf, 1.0))
+
+        results.sort(key=lambda x: x[1])
+        best_candidate, best_aic, best_pval = results[0]
+
+        if best_aic < current_aic and best_pval < p_threshold:
+            selected.append(best_candidate)
+            remaining.remove(best_candidate)
+            current_aic = best_aic
+            print(f"Step {step}: Add '{best_candidate}' | AIC = {best_aic:.2f} | p = {best_pval:.4f}")
+        else:
+            print(f"Step {step}: No improvement. Stop.")
+            break
+
+    print(f"\nSelected {len(selected)} features: {selected}")
+    return selected
+
+
+# In[6]:
+
+
+# Run forward selection to find best features
+selected_features = forward_selection(X, y)
+
+# In[7]:
+
+
+# Train final logistic regression with selected features
+X_final = sm.add_constant(X[selected_features])
+model = sm.GLM(y, X_final, family=sm.families.Gamma()).fit()
+print(model.summary())
+
+# In[8]:
+
+
+coef_df = pd.DataFrame({
+    "Coefficient": model.params,
+    "Std Error": model.bse,
+    "z-value": model.tvalues,
+    "p-value": model.pvalues,
+})
+
+
+def sig_stars(p):
+    if p < 0.001:
+        return "***"
+    elif p < 0.01:
+        return "**"
+    elif p < 0.05:
+        return "*"
+    else:
+        return ""  # *** p<0.001, ** p<0.01, * p<0.05
+
+
+coef_df["Sig"] = coef_df["p-value"].apply(sig_stars)
+
+print("COEFFICIENT TABLE")
+print(coef_df.round(4))
+
+# In[9]:
+
+
+print("MODEL FIT STATISTICS")
+print(f"Deviance:            {model.deviance:.4f}")
+print(f"Pearson chi2:        {model.pearson_chi2:.4f}")
+print(f"Log-Likelihood:      {model.llf:.2f}")
+print(f"AIC:                 {model.aic:.2f}")
+print(f"BIC:                 {model.bic:.2f}")
+print(f"Pseudo R² (CS):      {model.pseudo_rsquared():.4f}")
+
+# In[10]:
+
+
+fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+
+residuals = model.resid_pearson
+fitted = model.fittedvalues
+
+# homoscedasticity and non-linear patterns
+axes[0].scatter(fitted, residuals, alpha=0.5)
+axes[0].axhline(y=0, color='r', linestyle='--')
+axes[0].set_xlabel('Fitted Values')
+axes[0].set_ylabel('Pearson Residuals')
+axes[0].set_title('Residuals vs Fitted')
+
+stats.probplot(residuals, dist="norm", plot=axes[1])
+axes[1].set_title('Q-Q Plot')
+
+plt.tight_layout()
+plt.show()
+# Left plot: check for patterns in residuals
+# Right plot: Q-Q plot checks if residuals follow normal distribution
+
+
+# In[11]:
+
+
+print("PREDICTION FOR February 2026")
+
+latest = X[selected_features].iloc[-1:]
+latest_with_const = sm.add_constant(latest, has_constant='add')
+
+print(f"Latest observation: {X.index[-1].strftime('%Y-%m')}")
+print(f"\nFeature values:")
+for feat in selected_features:
+    print(f"  {feat}: {latest[feat].values[0]:.4f}")
+
+pred_unrate = model.predict(latest_with_const).values[0]
+
+print(f"\n>>> Predicted Unemployment Rate for February 2026: {pred_unrate:.2f}%")
+
+# In[12]:
+
+# Compare with OLS (Linear Regression)
+print("=" * 60)
+print("OLS MODEL FOR COMPARISON")
+print("=" * 60)
+
+model_ols = sm.OLS(y, X_final).fit()
+print(model_ols.summary())
+
+# In[24]:
+
+
+# Model Comparison
+print("MODEL COMPARISON: Gamma vs OLS")
+print("=" * 60)
+
+pred_gamma = model.predict(latest_with_const).values[0]
+pred_ols = model_ols.predict(latest_with_const).values[0]
+
+print(f"{'Metric':<25} {'Gamma':>15} {'OLS':>15}")
+print("-" * 60)
+print(f"{'Predicted February 2026':<25} {pred_gamma:>15.2f}% {pred_ols:>15.2f}%")
+
+# In[26]:
+
+
+# check heteroscedasticity of OLS
+
+from statsmodels.stats.diagnostic import het_breuschpagan
+
+bp_test = het_breuschpagan(model_ols.resid, X_final)
+print(f"Breusch-Pagan p-value: {bp_test[1]:.4f}")
+
+null_deviance = model.null_deviance
+resid_deviance = model.deviance
+
+reduction = (null_deviance - resid_deviance) / null_deviance * 100
+print(f"Null deviance: {null_deviance:.2f}")
+print(f"Residual deviance: {resid_deviance:.2f}")
+print(f"Deviance reduction: {reduction:.1f}%")
+
+# ======================================================
+# SHAPLEY VALUE ANALYSIS
+# ======================================================
+print()
+print("\nSHAPLEY VALUE ANALYSIS")
+
+# Use fitted values and coefficients from Gamma model
+beta = model.params
+
+# Drop intercept for interpretability
+beta_no_const = beta.drop("const")
+
+X_no_const = X_final.drop(columns=["const"])
+
+# Baseline prediction: mean fitted value
+baseline = model.fittedvalues.mean()
+
+# Calculate Shapley values (linear approximation)
+# contribution = beta_j * (x_ij - E[x_j])
+shap_values = {}
+
+for col in X_no_const.columns:
+    shap_contrib = beta_no_const[col] * (X_no_const[col] - X_no_const[col].mean())
+    shap_values[col] = shap_contrib.mean()
+
+shap_df = pd.DataFrame.from_dict(
+    shap_values, orient="index", columns=["Shapley Value"]
+)
+
+# Absolute contribution
+shap_df["Abs Shapley"] = shap_df["Shapley Value"].abs()
+
+# Percentage contribution
+total = shap_df["Abs Shapley"].sum()
+shap_df["Percentage (%)"] = shap_df["Abs Shapley"] / total * 100
+
+# Sort descending
+shap_df = shap_df.sort_values("Percentage (%)", ascending=False)
+
+print("\nPredictors ranked by Shapley Percentage Contribution:")
+print(shap_df[["Percentage (%)"]].round(2))
+
+# ------------------------------------------------------
+# Bar Plot
+# ------------------------------------------------------
+
+plt.figure(figsize=(8, 5))
+plt.barh(
+    shap_df.index[::-1],
+    shap_df["Percentage (%)"][::-1],
+    alpha=0.75
+)
+
+plt.xlabel("Percentage Contribution (%)")
+plt.title("Predictors' Shapley Values (Descending Importance)")
+plt.grid(axis="x", linestyle="--", alpha=0.5)
+plt.tight_layout()
+plt.show()
+
+# ======================================================
+# MODEL PERFORMANCE: RMSE
+# ======================================================
+print()
+from sklearn.metrics import mean_squared_error
+import numpy as np
+
+# Use in-sample prediction
+y_pred = model.predict(X_final)
+
+rmse = np.sqrt(mean_squared_error(y, y_pred))
+
+print(f"RMSE (in-sample): {rmse:.4f}")
+print()
+# ======================================================
+# PREDICTION VS ACTUAL PLOT
+# ======================================================
+
+import matplotlib.pyplot as plt
+
+plt.figure(figsize=(6, 6))
+
+plt.scatter(
+    y, y_pred,
+    alpha=0.4,
+    s=25
+)
+
+# 45-degree reference line
+min_val = min(y.min(), y_pred.min())
+max_val = max(y.max(), y_pred.max())
+
+plt.plot(
+    [min_val, max_val],
+    [min_val, max_val],
+    linestyle="dashed",
+    color="black",
+    linewidth=1.2
+)
+
+plt.xlabel("Observed U-3 Unemployment Rate (%)")
+plt.ylabel("Predicted U-3 Unemployment Rate (%)")
+plt.title("Observed vs Predicted U-3 Unemployment Rate")
+
+plt.grid(True, linestyle="--", alpha=0.4)
+plt.tight_layout()
+plt.show()
+print()
+# ======================================================
+# RESIDUAL DIAGNOSTICS
+# ======================================================
+
+residuals = y - y_pred
+
+plt.figure(figsize=(6, 4))
+
+plt.scatter(
+    y_pred,
+    residuals,
+    alpha=0.4,
+    s=25
+)
+
+plt.axhline(
+    y=0,
+    linestyle="dashed",
+    color="red"
+)
+
+plt.xlabel("Fitted Values")
+plt.ylabel("Residuals")
+plt.title("Residuals vs Fitted Values")
+
+plt.grid(True, linestyle="--", alpha=0.4)
+plt.tight_layout()
+plt.show()
+
+std_resid = residuals / residuals.std()
+
+plt.figure(figsize=(6,4))
+plt.scatter(y_pred, std_resid, alpha=0.4)
+plt.axhline(0, linestyle="--", color="red")
+plt.axhline(2, linestyle="dotted", color="gray")
+plt.axhline(-2, linestyle="dotted", color="gray")
+
+plt.xlabel("Fitted Values")
+plt.ylabel("Standardized Residuals")
+plt.title("Standardized Residuals vs Fitted")
+plt.tight_layout()
+plt.show()
+from sklearn.metrics import mean_absolute_error
+
+mae = mean_absolute_error(y, y_pred)
+print(f"MAE (in-sample): {mae:.4f}")
+# Last 12 months as pseudo hold-out
+y_last = y[-12:]
+X_last = X_final[-12:]
+
+y_last_pred = model.predict(X_last)
+
+rmse_last = np.sqrt(mean_squared_error(y_last, y_last_pred))
+print(f"RMSE (last 12 months): {rmse_last:.4f}")
+pred_std = residuals.std()
+
+lower = y_pred - 1.96 * pred_std
+upper = y_pred + 1.96 * pred_std
+print("\nMODEL SUMMARY")
+print("-" * 30)
+print(f"RMSE: {rmse:.3f}")
+print(f"MAE: {mae:.3f}")
+
+```
