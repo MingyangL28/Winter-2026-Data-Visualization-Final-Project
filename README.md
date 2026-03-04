@@ -1,10 +1,9 @@
 # 📈 Macroeconomic Unemployment Prediction Dashboard
 
-[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)]
 ## 📌 Project Overview
 This project explores the impact of macroeconomic indicators on the U.S. Unemployment Rate (UNRATE). By leveraging a **Gamma Generalized Linear Model (GLM)** and **SHAP (Shapley Additive exPlanations)** attribution analysis, this interactive dashboard predicts future unemployment trends and dynamically explains the economic intuition behind each predictor.
 
-**👉 [Click here to view the Live Dashboard!]**
+**👉 [Click here to view the Live Dashboard!]https://winter-2026-data-visualization-final-project-3bwx6zsa2nffszdxr.streamlit.app**
 
 ## ✨ Key Features
 * **Interactive SHAP Explainer:** Select different economic indicators (e.g., Term Spread, CPI, Industrial Production) to see how they positively or negatively drive the unemployment rate.
