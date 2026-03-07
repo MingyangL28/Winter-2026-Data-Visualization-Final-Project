@@ -3,404 +3,335 @@ title: "Untitled"
 format: html
 ---
 
+This part is the foundation of the entire analysis. Real-world data is often scattered across different files (such as unemployment rates, education levels, poverty rates, and racial distribution). We need to merge them into a single comprehensive dataset.
+
+The key technique here is fixing the FIPS codes. Since the state code for Illinois is 17, some raw datasets might have lost this prefix (for example, turning 17031 into 31). We forcefully pad and fix them in this step so that subsequent table merges and spatial mapping won't fail due to missing data matches.
 ```{python}
 import pandas as pd
 import numpy as np
-from scipy import stats
-import statsmodels.api as sm
-import matplotlib.pyplot as plt
-from sklearn.metrics import confusion_matrix, classification_report, roc_auc_score, roc_curve
+import plotly.express as px
+import plotly.graph_objects as go
+from sklearn.linear_model import LinearRegression
+import urllib.request
+import json
 import warnings
 
+# Suppress warnings for cleaner output
 warnings.filterwarnings('ignore')
 
-# In[ ]:
-
-
-# Load dataset
-
-df = pd.read_csv("data/macro_features.csv", parse_dates=["date"]).set_index("date")
-
-print("Dataset shape:", df.shape)
-print("Date range:", df.index.min(), "to", df.index.max())
-
-y = df["unrate"]
-print(f"\nTarget: UNRATE (Unemployment Rate)")
-print(f"Mean: {y.mean():.2f}%")
-print(f"Range: {y.min():.2f}% - {y.max():.2f}%")
-
-# In[4]:
-
-
-# Select candidate features for predicting unemployment rate
-# Remove unrate_momentum and unrate_change to avoid data leakage
-# removing these 2 as we can't use
-# unemployment-derived features to predict unemployment itself)
-candidate_features = [
-    "termspread",
-    "termspread_lag3",
-    "indpro_growth",
-    "indpro_momentum",
-    "cpi_yoy",
-    "tb3ms_lag6",
-    "gs10_lag6",
-]
-
-X = df[candidate_features].copy()
-print(f"Using {len(candidate_features)} candidate features")
-
-
-# In[5]:
-
-
-# Forward Selection:using AIC criterion for Gamma Regression
-def forward_selection(X, y, p_threshold=0.10):
-    remaining = list(X.columns)
-    selected = []
-
-    # Null model uses intercept only (baseline for comparison)
-    X_const = sm.add_constant(pd.DataFrame(index=X.index))
-    null_model = sm.GLM(y, X_const, family=sm.families.Gamma()).fit()
-    current_aic = null_model.aic
-
-    print("FORWARD SELECTION (AIC Criterion)")
-    print(f"Step 0: Null model | AIC = {current_aic:.2f}")
-
-    step = 0
-    while remaining:
-        step += 1
-        results = []
-
-        # one at a time for each remaining var
-        for candidate in remaining:
-            features = selected + [candidate]
-            X_try = sm.add_constant(X[features])
-            try:
-                model = sm.GLM(y, X_try, family=sm.families.Gamma()).fit()
-                p_val = model.pvalues[candidate]
-                results.append((candidate, model.aic, p_val))
-            except:
-                results.append((candidate, np.inf, 1.0))
-
-        results.sort(key=lambda x: x[1])
-        best_candidate, best_aic, best_pval = results[0]
-
-        if best_aic < current_aic and best_pval < p_threshold:
-            selected.append(best_candidate)
-            remaining.remove(best_candidate)
-            current_aic = best_aic
-            print(f"Step {step}: Add '{best_candidate}' | AIC = {best_aic:.2f} | p = {best_pval:.4f}")
-        else:
-            print(f"Step {step}: No improvement. Stop.")
-            break
-
-    print(f"\nSelected {len(selected)} features: {selected}")
-    return selected
-
-
-# In[6]:
-
-
-# Run forward selection to find best features
-selected_features = forward_selection(X, y)
-
-# In[7]:
-
-
-# Train final logistic regression with selected features
-X_final = sm.add_constant(X[selected_features])
-model = sm.GLM(y, X_final, family=sm.families.Gamma()).fit()
-print(model.summary())
-
-# In[8]:
-
-
-coef_df = pd.DataFrame({
-    "Coefficient": model.params,
-    "Std Error": model.bse,
-    "z-value": model.tvalues,
-    "p-value": model.pvalues,
-})
-
-
-def sig_stars(p):
-    if p < 0.001:
-        return "***"
-    elif p < 0.01:
-        return "**"
-    elif p < 0.05:
-        return "*"
-    else:
-        return ""  # *** p<0.001, ** p<0.01, * p<0.05
-
-
-coef_df["Sig"] = coef_df["p-value"].apply(sig_stars)
-
-print("COEFFICIENT TABLE")
-print(coef_df.round(4))
-
-# In[9]:
-
-
-print("MODEL FIT STATISTICS")
-print(f"Deviance:            {model.deviance:.4f}")
-print(f"Pearson chi2:        {model.pearson_chi2:.4f}")
-print(f"Log-Likelihood:      {model.llf:.2f}")
-print(f"AIC:                 {model.aic:.2f}")
-print(f"BIC:                 {model.bic:.2f}")
-print(f"Pseudo R² (CS):      {model.pseudo_rsquared():.4f}")
-
-# In[10]:
-
-
-fig, axes = plt.subplots(1, 2, figsize=(12, 5))
-
-residuals = model.resid_pearson
-fitted = model.fittedvalues
-
-# homoscedasticity and non-linear patterns
-axes[0].scatter(fitted, residuals, alpha=0.5)
-axes[0].axhline(y=0, color='r', linestyle='--')
-axes[0].set_xlabel('Fitted Values')
-axes[0].set_ylabel('Pearson Residuals')
-axes[0].set_title('Residuals vs Fitted')
-
-stats.probplot(residuals, dist="norm", plot=axes[1])
-axes[1].set_title('Q-Q Plot')
-
-plt.tight_layout()
-plt.show()
-# Left plot: check for patterns in residuals
-# Right plot: Q-Q plot checks if residuals follow normal distribution
-
-
-# In[11]:
-
-
-print("PREDICTION FOR February 2026")
-
-latest = X[selected_features].iloc[-1:]
-latest_with_const = sm.add_constant(latest, has_constant='add')
-
-print(f"Latest observation: {X.index[-1].strftime('%Y-%m')}")
-print(f"\nFeature values:")
-for feat in selected_features:
-    print(f"  {feat}: {latest[feat].values[0]:.4f}")
-
-pred_unrate = model.predict(latest_with_const).values[0]
-
-print(f"\n>>> Predicted Unemployment Rate for February 2026: {pred_unrate:.2f}%")
-
-# In[12]:
-
-# Compare with OLS (Linear Regression)
-print("=" * 60)
-print("OLS MODEL FOR COMPARISON")
-print("=" * 60)
-
-model_ols = sm.OLS(y, X_final).fit()
-print(model_ols.summary())
-
-# In[24]:
-
-
-# Model Comparison
-print("MODEL COMPARISON: Gamma vs OLS")
-print("=" * 60)
-
-pred_gamma = model.predict(latest_with_const).values[0]
-pred_ols = model_ols.predict(latest_with_const).values[0]
-
-print(f"{'Metric':<25} {'Gamma':>15} {'OLS':>15}")
-print("-" * 60)
-print(f"{'Predicted February 2026':<25} {pred_gamma:>15.2f}% {pred_ols:>15.2f}%")
-
-# In[26]:
-
-
-# check heteroscedasticity of OLS
-
-from statsmodels.stats.diagnostic import het_breuschpagan
-
-bp_test = het_breuschpagan(model_ols.resid, X_final)
-print(f"Breusch-Pagan p-value: {bp_test[1]:.4f}")
-
-null_deviance = model.null_deviance
-resid_deviance = model.deviance
-
-reduction = (null_deviance - resid_deviance) / null_deviance * 100
-print(f"Null deviance: {null_deviance:.2f}")
-print(f"Residual deviance: {resid_deviance:.2f}")
-print(f"Deviance reduction: {reduction:.1f}%")
-
-# ======================================================
-# SHAPLEY VALUE ANALYSIS
-# ======================================================
-print()
-print("\nSHAPLEY VALUE ANALYSIS")
-
-# Use fitted values and coefficients from Gamma model
-beta = model.params
-
-# Drop intercept for interpretability
-beta_no_const = beta.drop("const")
-
-X_no_const = X_final.drop(columns=["const"])
-
-# Baseline prediction: mean fitted value
-baseline = model.fittedvalues.mean()
-
-# Calculate Shapley values (linear approximation)
-# contribution = beta_j * (x_ij - E[x_j])
-shap_values = {}
-
-for col in X_no_const.columns:
-    shap_contrib = beta_no_const[col] * (X_no_const[col] - X_no_const[col].mean())
-    shap_values[col] = shap_contrib.mean()
-
-shap_df = pd.DataFrame.from_dict(
-    shap_values, orient="index", columns=["Shapley Value"]
-)
-
-# Absolute contribution
-shap_df["Abs Shapley"] = shap_df["Shapley Value"].abs()
-
-# Percentage contribution
-total = shap_df["Abs Shapley"].sum()
-shap_df["Percentage (%)"] = shap_df["Abs Shapley"] / total * 100
-
-# Sort descending
-shap_df = shap_df.sort_values("Percentage (%)", ascending=False)
-
-print("\nPredictors ranked by Shapley Percentage Contribution:")
-print(shap_df[["Percentage (%)"]].round(2))
-
-# ------------------------------------------------------
-# Bar Plot
-# ------------------------------------------------------
-
-plt.figure(figsize=(8, 5))
-plt.barh(
-    shap_df.index[::-1],
-    shap_df["Percentage (%)"][::-1],
-    alpha=0.75
-)
-
-plt.xlabel("Percentage Contribution (%)")
-plt.title("Predictors' Shapley Values (Descending Importance)")
-plt.grid(axis="x", linestyle="--", alpha=0.5)
-plt.tight_layout()
-plt.show()
-
-# ======================================================
-# MODEL PERFORMANCE: RMSE
-# ======================================================
-print()
-from sklearn.metrics import mean_squared_error
+# ---------------------------------------------------------
+# Part 1: Data Cleaning & Merging
+# ---------------------------------------------------------
+
+# Helper function to clean and fix FIPS codes
+def clean_fips(series):
+    # Strip whitespace and remove trailing '.0'
+    s = series.astype(str).str.strip().str.replace(r'\.0$', '', regex=True)
+    # Append Illinois state prefix '17' if missing (length <= 3)
+    return s.apply(lambda x: '17' + x.zfill(3) if len(x) <= 3 else x.zfill(5))
+
+# 1. Load and clean main Unemployment data
+df_main = pd.read_csv("UnemploymentReport.csv")
+df_main.columns = df_main.columns.str.strip()
+df_main["FIPS"] = clean_fips(df_main["FIPS"])
+df_main["Merge_Name"] = df_main["Name"].str.replace(" County, IL", "", regex=False).str.lower().str.replace(" ", "").str.replace(".", "", regex=False)
+
+# 2. Load and clean Education data (Bachelor's Degree %)
+df_edu = pd.read_csv("bachelor.csv")
+fips_col = [col for col in df_edu.columns if 'FIPS' in col.upper()][0]
+df_edu = df_edu[[fips_col, "2019-2023"]].rename(columns={fips_col: "FIPS", "2019-2023": "Bach_Pct"})
+df_edu["Bach_Pct"] = pd.to_numeric(df_edu["Bach_Pct"].astype(str).str.replace('%', ''), errors='coerce')
+df_edu["FIPS"] = clean_fips(df_edu["FIPS"])
+
+# 3. Load and clean Poverty data
+df_pov_raw = pd.read_csv("PovertyReport.csv", skiprows=2)
+df_pov = df_pov_raw.iloc[:, [0, 5]].copy() 
+df_pov.columns = ["FIPS", "Poverty_Pct"]
+df_pov['FIPS'] = clean_fips(df_pov['FIPS'])
+df_pov['Poverty_Pct'] = pd.to_numeric(df_pov['Poverty_Pct'], errors='coerce')
+
+# 4. Load, transpose, and clean Census Race data (Black Population %)
+df_race_raw = pd.read_csv("DECENNIALDHC2020.P9-2026-03-04T220749.csv")
+df_race_t = df_race_raw.transpose()
+df_race_t.columns = df_race_t.iloc[0]
+df_race_t = df_race_t.drop(df_race_t.index[0])
+total_col = [c for c in df_race_t.columns if "Total:" in str(c)][0]
+black_col = [c for c in df_race_t.columns if "Black or African American alone" in str(c)][0]
+
+total_pop = pd.to_numeric(df_race_t[total_col].astype(str).str.replace(',', ''), errors='coerce')
+black_pop = pd.to_numeric(df_race_t[black_col].astype(str).str.replace(',', ''), errors='coerce')
+df_race_t["Black_Pct"] = (black_pop / total_pop) * 100
+df_race_t["Merge_Name"] = df_race_t.index.str.replace(" County, Illinois", "", regex=False).str.lower().str.replace(" ", "").str.replace(".", "", regex=False)
+
+# 5. Execute multiple inner joins to combine all datasets
+m1 = pd.merge(df_main, df_edu, on="FIPS", how="inner")
+m2 = pd.merge(m1, df_pov, on="FIPS", how="inner")
+df = pd.merge(m2, df_race_t[["Merge_Name", "Black_Pct"]], on="Merge_Name", how="inner")
+
+# Convert target columns to numeric and drop any rows with missing values
+cols_to_check = ["2023", "2020", "Bach_Pct", "Poverty_Pct", "Black_Pct"]
+for c in cols_to_check:
+    df[c] = pd.to_numeric(df[c], errors='coerce')
+df = df.dropna(subset=cols_to_check)
+
+print(f"Data Cleaning Complete. Total counties retained: {len(df)}")
+```
+
+
+I use the 2020 pandemic unemployment rate, bachelor's degree percentage, poverty rate, and Black population percentage as input features (X) to predict the actual 2023 unemployment rate (y).
+The most crucial metric we calculate here is the Residual (Predicted Value - Actual Value). If the residual is exceptionally large, it means the county's unemployment rate deviates from the standard socioeconomic pattern, indicating potential unique local industries or policies that require deeper investigation.
+
+```{python}
+# ---------------------------------------------------------
+# Part 2: Machine Learning Prediction & Residuals
+# ---------------------------------------------------------
+
+# Define independent variables (X) and dependent variable (y)
+X = df[["2020", "Bach_Pct", "Poverty_Pct", "Black_Pct"]]
+y = df["2023"]
+
+# Initialize and fit the Multiple Linear Regression model
+model = LinearRegression()
+model.fit(X, y)
+
+# Generate AI predictions based on the 4 socioeconomic factors
+df["Predicted_2023"] = model.predict(X)
+
+# Calculate Residuals (Predicted - Actual)
+# Force as float to prevent Plotly continuous color scale errors
+df["Residual"] = (df["Predicted_2023"] - df["2023"]).astype(float)
+
+print("Machine Learning modeling complete. Predictions and Residuals added.")
+
+
+```
+
+Gemini said
+没问题！根据您的要求，我将各个部分的文字解释全部翻译成了英文，代码中的注释也已经全部是英文了。
+
+您可以将这些代码块逐个复制到 Jupyter Notebook 的不同单元格（Cells）中运行。
+
+Part 1: Data Cleaning & Merging
+
+📝 Explanation:
+This part is the foundation of the entire analysis. Real-world data is often scattered across different files (such as unemployment rates, education levels, poverty rates, and racial distribution). We need to merge them into a single comprehensive dataset.
+
+The key technique here is fixing the FIPS codes. Since the state code for Illinois is 17, some raw datasets might have lost this prefix (for example, turning 17031 into 31). We forcefully pad and fix them in this step so that subsequent table merges and spatial mapping won't fail due to missing data matches.
+
+Python
+import pandas as pd
 import numpy as np
+import plotly.express as px
+import plotly.graph_objects as go
+from sklearn.linear_model import LinearRegression
+import urllib.request
+import json
+import warnings
 
-# Use in-sample prediction
-y_pred = model.predict(X_final)
+# Suppress warnings for cleaner output
+warnings.filterwarnings('ignore')
 
-rmse = np.sqrt(mean_squared_error(y, y_pred))
+# ---------------------------------------------------------
+# Part 1: Data Cleaning & Merging
+# ---------------------------------------------------------
 
-print(f"RMSE (in-sample): {rmse:.4f}")
-print()
-# ======================================================
-# PREDICTION VS ACTUAL PLOT
-# ======================================================
+# Helper function to clean and fix FIPS codes
+def clean_fips(series):
+    # Strip whitespace and remove trailing '.0'
+    s = series.astype(str).str.strip().str.replace(r'\.0$', '', regex=True)
+    # Append Illinois state prefix '17' if missing (length <= 3)
+    return s.apply(lambda x: '17' + x.zfill(3) if len(x) <= 3 else x.zfill(5))
 
-import matplotlib.pyplot as plt
+# 1. Load and clean main Unemployment data
+df_main = pd.read_csv("UnemploymentReport.csv")
+df_main.columns = df_main.columns.str.strip()
+df_main["FIPS"] = clean_fips(df_main["FIPS"])
+df_main["Merge_Name"] = df_main["Name"].str.replace(" County, IL", "", regex=False).str.lower().str.replace(" ", "").str.replace(".", "", regex=False)
 
-plt.figure(figsize=(6, 6))
+# 2. Load and clean Education data (Bachelor's Degree %)
+df_edu = pd.read_csv("bachelor.csv")
+fips_col = [col for col in df_edu.columns if 'FIPS' in col.upper()][0]
+df_edu = df_edu[[fips_col, "2019-2023"]].rename(columns={fips_col: "FIPS", "2019-2023": "Bach_Pct"})
+df_edu["Bach_Pct"] = pd.to_numeric(df_edu["Bach_Pct"].astype(str).str.replace('%', ''), errors='coerce')
+df_edu["FIPS"] = clean_fips(df_edu["FIPS"])
 
-plt.scatter(
-    y, y_pred,
-    alpha=0.4,
-    s=25
+# 3. Load and clean Poverty data
+df_pov_raw = pd.read_csv("PovertyReport.csv", skiprows=2)
+df_pov = df_pov_raw.iloc[:, [0, 5]].copy() 
+df_pov.columns = ["FIPS", "Poverty_Pct"]
+df_pov['FIPS'] = clean_fips(df_pov['FIPS'])
+df_pov['Poverty_Pct'] = pd.to_numeric(df_pov['Poverty_Pct'], errors='coerce')
+
+# 4. Load, transpose, and clean Census Race data (Black Population %)
+df_race_raw = pd.read_csv("DECENNIALDHC2020.P9-2026-03-04T220749.csv")
+df_race_t = df_race_raw.transpose()
+df_race_t.columns = df_race_t.iloc[0]
+df_race_t = df_race_t.drop(df_race_t.index[0])
+total_col = [c for c in df_race_t.columns if "Total:" in str(c)][0]
+black_col = [c for c in df_race_t.columns if "Black or African American alone" in str(c)][0]
+
+total_pop = pd.to_numeric(df_race_t[total_col].astype(str).str.replace(',', ''), errors='coerce')
+black_pop = pd.to_numeric(df_race_t[black_col].astype(str).str.replace(',', ''), errors='coerce')
+df_race_t["Black_Pct"] = (black_pop / total_pop) * 100
+df_race_t["Merge_Name"] = df_race_t.index.str.replace(" County, Illinois", "", regex=False).str.lower().str.replace(" ", "").str.replace(".", "", regex=False)
+
+# 5. Execute multiple inner joins to combine all datasets
+m1 = pd.merge(df_main, df_edu, on="FIPS", how="inner")
+m2 = pd.merge(m1, df_pov, on="FIPS", how="inner")
+df = pd.merge(m2, df_race_t[["Merge_Name", "Black_Pct"]], on="Merge_Name", how="inner")
+
+# Convert target columns to numeric and drop any rows with missing values
+cols_to_check = ["2023", "2020", "Bach_Pct", "Poverty_Pct", "Black_Pct"]
+for c in cols_to_check:
+    df[c] = pd.to_numeric(df[c], errors='coerce')
+df = df.dropna(subset=cols_to_check)
+
+print(f"Data Cleaning Complete. Total counties retained: {len(df)}")
+Part 2: Machine Learning Prediction & Residuals
+
+📝 Explanation:
+We are not just looking at historical data; we are trying to uncover hidden patterns. Here, we introduce the Multiple Linear Regression model from scikit-learn
+Multiple Linear Regression, AI generated
+Shutterstock
+Explore
+
+.
+
+We use the 2020 pandemic unemployment rate, bachelor's degree percentage, poverty rate, and Black population percentage as input features (X) to predict the actual 2023 unemployment rate (y).
+The most crucial metric we calculate here is the Residual (Predicted Value - Actual Value). If the residual is exceptionally large, it means the county's unemployment rate deviates from the standard socioeconomic pattern, indicating potential unique local industries or policies that require deeper investigation.
+
+Python
+# ---------------------------------------------------------
+# Part 2: Machine Learning Prediction & Residuals
+# ---------------------------------------------------------
+
+# Define independent variables (X) and dependent variable (y)
+X = df[["2020", "Bach_Pct", "Poverty_Pct", "Black_Pct"]]
+y = df["2023"]
+
+# Initialize and fit the Multiple Linear Regression model
+model = LinearRegression()
+model.fit(X, y)
+
+# Generate AI predictions based on the 4 socioeconomic factors
+df["Predicted_2023"] = model.predict(X)
+
+# Calculate Residuals (Predicted - Actual)
+# Force as float to prevent Plotly continuous color scale errors
+df["Residual"] = (df["Predicted_2023"] - df["2023"]).astype(float)
+
+print("Machine Learning modeling complete. Predictions and Residuals added.")
+Part 3: Advanced Visualizations
+
+📝 Explanation:
+Now that our data is fully prepped, the next step is storytelling through visual analytics. We use Plotly to create interactive, hoverable charts:
+
+Boxplot: Displays the overall distribution of the 2023 unemployment rates and helps identify extreme outliers.
+
+Multivariate Quadrant Scatter: The X-axis represents poverty, the Y-axis is unemployment, the bubble size indicates education levels, and the color scale reflects our calculated "residual". This single chart visualizes 4 dimensions of data!
+
+Predicted vs Actual: Draws a diagonal reference line. The closer the data points are to this line, the more accurate our regression model is.
+
+Correlation Heatmap: Visually demonstrates the strength of relationships between all socioeconomic variables.
+
+Leaderboard: A bar chart that intuitively highlights the top 20 counties suffering from the highest unemployment rates in 2023.
+
+
+```{python}
+# ---------------------------------------------------------
+# Part 3: Advanced Visualizations
+# ---------------------------------------------------------
+plotly_theme = "plotly_dark"  # Use dark theme for dashboard aesthetics
+
+# 1. Boxplot with all data points
+fig_box = px.box(df, y="2023", points="all", template=plotly_theme, 
+                 title="Distribution of 2023 Unemployment Rates",
+                 labels={"2023": "2023 Unemployment (%)"})
+fig_box.update_traces(marker=dict(color='#90CAF9', size=6), boxmean=True)
+fig_box.show()
+
+# 2. Multivariate Quadrant Scatter Plot
+fig_scatter = px.scatter(
+    df, 
+    x="Poverty_Pct", 
+    y="2023", 
+    color="Residual", 
+    size="Bach_Pct",
+    hover_name="Name", 
+    color_continuous_scale="RdBu_r", 
+    template=plotly_theme,
+    title="Multivariate Quadrant (Poverty vs Unemployment)",
+    labels={"Poverty_Pct": "Poverty Rate (%)", "2023": "2023 Unemployment (%)"}
 )
+fig_scatter.show()
 
-# 45-degree reference line
-min_val = min(y.min(), y_pred.min())
-max_val = max(y.max(), y_pred.max())
+# 3. Predicted vs Actual Model Diagnostics
+fig_pred = px.scatter(df, x="2023", y="Predicted_2023", hover_name="Name", trendline="ols",
+                      template=plotly_theme, title="Predicted vs Actual Unemployment (2023)",
+                      labels={"2023": "Actual 2023 (%)", "Predicted_2023": "Predicted 2023 (%)"})
 
-plt.plot(
-    [min_val, max_val],
-    [min_val, max_val],
-    linestyle="dashed",
-    color="black",
-    linewidth=1.2
+# Add Y=X baseline for perfect prediction reference
+min_val = min(df["2023"].min(), df["Predicted_2023"].min())
+max_val = max(df["2023"].max(), df["Predicted_2023"].max())
+fig_pred.add_shape(type="line", x0=min_val, y0=min_val, x1=max_val, y1=max_val, line=dict(color="gray", dash="dot"))
+fig_pred.show()
+
+# 4. Correlation Matrix Heatmap
+corr_cols = ["2020", "Bach_Pct", "Poverty_Pct", "Black_Pct", "2023", "Predicted_2023", "Residual"]
+corr_matrix = df[corr_cols].corr()
+fig_heat = px.imshow(corr_matrix, text_auto=".2f", aspect="auto", color_continuous_scale="RdBu_r", 
+                     template=plotly_theme, title="Pearson Correlation Heatmap")
+fig_heat.show()
+
+# 5. Leaderboard Bar Chart (Top 20 Counties)
+df_sorted = df.sort_values(by="2023", ascending=False).head(20)
+fig_leader = px.bar(df_sorted, x="Name", y="2023", template=plotly_theme, 
+                    title="Leaderboard (Top 20 Highest Unemployment Counties)", 
+                    color_discrete_sequence=["#90CAF9"])
+fig_leader.show()
+
+```
+
+
+Part 4: Spatial Map Intelligence
+
+📝 Explanation:
+The final step is projecting our findings onto real-world geography .
+
+Instead of requiring you to download a local .geojson or .shp shapefile, this code dynamically fetches a standardized US counties boundary file directly from Github via Python. Using our successfully repaired FIPS codes, we map out the "Prediction Residuals" using a choropleth map. Blue areas indicate counties performing better than expected, while red areas are worse off than the model predicted.
+
+We generate two distinct views: a statewide overview of Illinois and a zoomed-in perspective of the Chicago metropolitan area.
+
+
+```{python}
+# ---------------------------------------------------------
+# Part 4: Interactive Spatial Map Intelligence
+# ---------------------------------------------------------
+
+print("Fetching US Counties GeoJSON from web...")
+# Dynamically pull spatial geometry data via URL
+url = "https://raw.githubusercontent.com/plotly/datasets/master/geojson-counties-fips.json"
+with urllib.request.urlopen(url) as response:
+    counties_geojson = json.load(response)
+
+# 1. Statewide Choropleth Map showing Residuals
+fig_map_state = px.choropleth_mapbox(
+    df, geojson=counties_geojson, locations='FIPS', color='Residual',
+    color_continuous_scale="RdBu_r", mapbox_style="carto-darkmatter",
+    zoom=5, center={"lat": 40.0, "lon": -89.0}, opacity=0.8,
+    hover_name="Name", template=plotly_theme, 
+    title="Spatial Intelligence: Residual Diagnostics (Illinois Statewide)"
 )
+fig_map_state.show()
 
-plt.xlabel("Observed U-3 Unemployment Rate (%)")
-plt.ylabel("Predicted U-3 Unemployment Rate (%)")
-plt.title("Observed vs Predicted U-3 Unemployment Rate")
-
-plt.grid(True, linestyle="--", alpha=0.4)
-plt.tight_layout()
-plt.show()
-print()
-# ======================================================
-# RESIDUAL DIAGNOSTICS
-# ======================================================
-
-residuals = y - y_pred
-
-plt.figure(figsize=(6, 4))
-
-plt.scatter(
-    y_pred,
-    residuals,
-    alpha=0.4,
-    s=25
+# 2. Chicago Metropolitan Area Zoom-in Map
+fig_map_chi = px.choropleth_mapbox(
+    df, geojson=counties_geojson, locations='FIPS', color='Residual',
+    color_continuous_scale="RdBu_r", mapbox_style="carto-darkmatter",
+    zoom=7.5, center={"lat": 41.8, "lon": -87.8}, opacity=0.8,
+    hover_name="Name", template=plotly_theme, 
+    title="Spatial Intelligence: Residual Diagnostics (Chicago Zoom)"
 )
-
-plt.axhline(
-    y=0,
-    linestyle="dashed",
-    color="red"
-)
-
-plt.xlabel("Fitted Values")
-plt.ylabel("Residuals")
-plt.title("Residuals vs Fitted Values")
-
-plt.grid(True, linestyle="--", alpha=0.4)
-plt.tight_layout()
-plt.show()
-
-std_resid = residuals / residuals.std()
-
-plt.figure(figsize=(6,4))
-plt.scatter(y_pred, std_resid, alpha=0.4)
-plt.axhline(0, linestyle="--", color="red")
-plt.axhline(2, linestyle="dotted", color="gray")
-plt.axhline(-2, linestyle="dotted", color="gray")
-
-plt.xlabel("Fitted Values")
-plt.ylabel("Standardized Residuals")
-plt.title("Standardized Residuals vs Fitted")
-plt.tight_layout()
-plt.show()
-from sklearn.metrics import mean_absolute_error
-
-mae = mean_absolute_error(y, y_pred)
-print(f"MAE (in-sample): {mae:.4f}")
-# Last 12 months as pseudo hold-out
-y_last = y[-12:]
-X_last = X_final[-12:]
-
-y_last_pred = model.predict(X_last)
-
-rmse_last = np.sqrt(mean_squared_error(y_last, y_last_pred))
-print(f"RMSE (last 12 months): {rmse_last:.4f}")
-pred_std = residuals.std()
-
-lower = y_pred - 1.96 * pred_std
-upper = y_pred + 1.96 * pred_std
-print("\nMODEL SUMMARY")
-print("-" * 30)
-print(f"RMSE: {rmse:.3f}")
-print(f"MAE: {mae:.3f}")
+fig_map_chi.show()
 
 ```
