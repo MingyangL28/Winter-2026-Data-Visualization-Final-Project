@@ -29,7 +29,7 @@ This is an interactive spatial data analysis dashboard built with Python and Str
 ├── app.py                     # Main Streamlit application (UI, data merging, ML logic)
 └── README.md                  # Project documentation
 ```
-- 🧬 Data Dictionary
+- 🧬 Data Dictionary:
 The final model utilizes the following 7 core features to predict the 2023 Unemployment Rate (Target):
 
 Bach_Pct: Percentage of population with a Bachelor's degree or higher (%)
@@ -46,7 +46,7 @@ Manufacturing_Pct: Percentage of the employed population in manufacturing (%)
 
 Median_Age: Median age of the population (Years)
 
-- 🚀 Installation & Setup
+- 🚀 Installation & Setup:
 1. Clone or download this repository to your local machine.
 
 2. Install Dependencies: Ensure you have the required Python libraries installed in your environment:
@@ -62,16 +62,16 @@ streamlit run app.py
 (The dashboard will automatically open in your default web browser at https://winter-2026-data-visualization-final-project-kyzeqkck3cwlbiztg.streamlit.app)
 
 - 🖥️ Dashboard Tabs Breakdown
-  - 📍 County Profile
+  - 📍 County Profile:
     Select a specific county to visualize its 7 economic features against the "Illinois State Average" using properly scaled bar charts.
-  - 📉 Regional Trends & ML
+  - 📉 Regional Trends & ML:
     Displays the OLS econometric interpretation table (coefficients & significance). Shows the AI feature importance ranking via a horizontal bar chart. Analyzes model residual distributions and lists the Top 10 over-predicted and under-predicted counties.
-  - 🔮 AI Scenario Simulator
+  - 🔮 AI Scenario Simulator:
     Features 7 dynamic sliders and a real-time gauge chart to test policy interventions (e.g., "If median income increases by $10,000, how much will unemployment drop?").
-  - 🗺️ Spatial Intelligence Map
+  - 🗺️ Spatial Intelligence Map:
     Map different data layers (Actual Unemployment, Model Residuals, Income, Manufacturing) onto the geographic space. Supports full statewide overview and deep zoom into the Chicago metro area.
 
-- ✍️ Author & Acknowledgments
+- ✍️ Author & Acknowledgments:
 Data Sources: U.S. Census Bureau (ACS 5-Year Data), Illinois Department of Labor, and open government datasets.
 
 Built with the Streamlit framework; interactive mapping powered by Plotly.
