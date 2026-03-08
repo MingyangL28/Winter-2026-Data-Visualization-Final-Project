@@ -57,30 +57,45 @@ print(f"✅ Saved Cleaned_DP05_Age.csv successfully! ({len(df_clean_dp05)} count
 print("\nProcessing DP03 (Economics)...")
 df_dp03_raw = pd.read_csv("raw-data/ACSDP5Y2023.DP03-2026-03-07T170912.csv")
 
-# Transpose the data
-df_dp03_raw.set_index(df_dp03_raw.columns[0], inplace=True)
-df_dp03 = df_dp03_raw.T.reset_index()
-df_dp03.rename(columns={'index': 'Raw_County'}, inplace=True)
+# Helper to clean individual cell values
+def clean_num(val):
+    s = str(val).strip().replace('$','').replace('%','').replace(',','').replace(' ','')
+    if s in ['-', 'N', '(X)', 'nan', '', 'None']:
+        return np.nan
+    try:
+        return float(s)
+    except:
+        return np.nan
 
-# Split into Estimate (for absolute Income $) and Percent (for Labor/Mfg %)
-df_dp03_est = df_dp03[df_dp03['Raw_County'].str.contains('!!Estimate')].copy()
-df_dp03_pct = df_dp03[df_dp03['Raw_County'].str.contains('!!Percent')].copy()
+# This file has rows = variables, columns = counties (alternating Estimate/Percent)
+# DO NOT transpose — read directly
+est_cols = [c for c in df_dp03_raw.columns[1:] if '!!Estimate' in c]
+pct_cols = [c for c in df_dp03_raw.columns[1:] if '!!Percent' in c]
 
-# Create 'Merge_Name'
-df_dp03_est['Merge_Name'] = df_dp03_est['Raw_County'].str.split('!!').str[0].str.replace(" County, Illinois", "", regex=False).str.lower().str.replace(" ", "").str.replace(".", "", regex=False)
+df_dp03_raw['_label'] = df_dp03_raw[df_dp03_raw.columns[0]].astype(str).str.strip()
 
-# Dynamically find target columns
-income_col = [col for col in df_dp03_est.columns if 'Median household income' in str(col)][0]
-lfpr_col = [col for col in df_dp03_pct.columns if 'In labor force' in str(col)][0]
-mfg_col = [col for col in df_dp03_pct.columns if 'Manufacturing' in str(col)][0]
+row_lfpr   = df_dp03_raw[df_dp03_raw['_label'] == 'In labor force'].index[0]
+row_mfg    = df_dp03_raw[df_dp03_raw['_label'] == 'Manufacturing'].index[0]
+row_income = df_dp03_raw[df_dp03_raw['_label'] == 'Median household income (dollars)'].index[0]
 
-# Assemble the final clean economic dataset
-df_clean_dp03 = pd.DataFrame({'Merge_Name': df_dp03_est['Merge_Name'].values})
-df_clean_dp03['Median_Income'] = clean_census_numbers(df_dp03_est[income_col].values)
-df_clean_dp03['Labor_Force_Pct'] = clean_census_numbers(df_dp03_pct[lfpr_col].values)
-df_clean_dp03['Manufacturing_Pct'] = clean_census_numbers(df_dp03_pct[mfg_col].values)
+# Extract county names from Estimate column headers
+county_names = [
+    c.replace(', Illinois!!Estimate','').replace(' County','')
+     .lower().replace(' ','').replace('.','')
+    for c in est_cols
+]
 
-# Save to a new CSV file
+# Build result row by row to avoid index alignment issues
+records = []
+for i, county in enumerate(county_names):
+    records.append({
+        'Merge_Name':        county,
+        'Median_Income':     clean_num(df_dp03_raw.loc[row_income, est_cols[i]]),
+        'Labor_Force_Pct':   clean_num(df_dp03_raw.loc[row_lfpr,   pct_cols[i]]),
+        'Manufacturing_Pct': clean_num(df_dp03_raw.loc[row_mfg,    pct_cols[i]]),
+    })
+
+df_clean_dp03 = pd.DataFrame(records)
 df_clean_dp03.to_csv("derived-data/Cleaned_DP03_Econ.csv", index=False)
 print(f"✅ Saved Cleaned_DP03_Econ.csv successfully! ({len(df_clean_dp03)} counties)")
 ```
