@@ -28,7 +28,7 @@ This is an interactive spatial data analysis dashboard built with Python and Str
 │   └── Cleaned_DP05_Age.csv   # Demographic features (Median Age)
 ├── app.py                     # Main Streamlit application (UI, data merging, ML logic)
 └── README.md                  # Project documentation
-
+```
 🧬 Data Dictionary
 The final model utilizes the following 7 core features to predict the 2023 Unemployment Rate (Target):
 
