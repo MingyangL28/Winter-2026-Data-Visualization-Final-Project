@@ -1,0 +1,86 @@
+---
+title: "Untitled"
+format: html
+---
+
+```{python}
+import pandas as pd
+import numpy as np
+import warnings
+
+warnings.filterwarnings('ignore')
+
+# ==========================================
+# Helper Function: Clean Numeric Strings
+# ==========================================
+def clean_census_numbers(series):
+    # Remove '$', '%', ',', and spaces, then convert to float for machine learning
+    s = series.astype(str).str.replace(r'[\$,% ]', '', regex=True)
+    # Replace Census '-' or 'N' (missing data) with NaN
+    s = s.replace(['-', 'N', '(X)'], np.nan)
+    return pd.to_numeric(s, errors='coerce')
+
+# ==========================================
+# 1. Clean DP05 (Demographics - Median Age)
+# ==========================================
+print("Processing DP05 (Demographics)...")
+df_dp05_raw = pd.read_csv("raw-data/ACSDP5Y2023.DP05-2026-03-07T171416.csv")
+
+# Set "Label (Grouping)" as the index and transpose so counties become rows
+df_dp05_raw.set_index(df_dp05_raw.columns[0], inplace=True)
+df_dp05 = df_dp05_raw.T.reset_index()
+df_dp05.rename(columns={'index': 'Raw_County'}, inplace=True)
+
+# We only need the "!!Estimate" rows to get the raw Median Age (not percentages)
+df_dp05_est = df_dp05[df_dp05['Raw_County'].str.contains('!!Estimate')].copy()
+
+# Create 'Merge_Name' to perfectly match your main dataframe (e.g., "Adams County..." -> "adams")
+df_dp05_est['Merge_Name'] = df_dp05_est['Raw_County'].str.split('!!').str[0]
+df_dp05_est['Merge_Name'] = df_dp05_est['Merge_Name'].str.replace(" County, Illinois", "", regex=False).str.lower().str.replace(" ", "").str.replace(".", "", regex=False)
+
+# Dynamically find the exact column containing "Median age"
+age_col = [col for col in df_dp05_est.columns if 'Median age' in str(col)][0]
+
+# Extract, clean, and format
+df_clean_dp05 = df_dp05_est[['Merge_Name', age_col]].copy()
+df_clean_dp05.rename(columns={age_col: 'Median_Age'}, inplace=True)
+df_clean_dp05['Median_Age'] = clean_census_numbers(df_clean_dp05['Median_Age'])
+
+# Save to a new CSV file
+df_clean_dp05.to_csv("derived-data/Cleaned_DP05_Age.csv", index=False)
+print(f"✅ Saved Cleaned_DP05_Age.csv successfully! ({len(df_clean_dp05)} counties)")
+
+
+# ==========================================
+# 2. Clean DP03 (Economics - Income, Labor, Mfg)
+# ==========================================
+print("\nProcessing DP03 (Economics)...")
+df_dp03_raw = pd.read_csv("raw-data/ACSDP5Y2023.DP03-2026-03-07T170912.csv")
+
+# Transpose the data
+df_dp03_raw.set_index(df_dp03_raw.columns[0], inplace=True)
+df_dp03 = df_dp03_raw.T.reset_index()
+df_dp03.rename(columns={'index': 'Raw_County'}, inplace=True)
+
+# Split into Estimate (for absolute Income $) and Percent (for Labor/Mfg %)
+df_dp03_est = df_dp03[df_dp03['Raw_County'].str.contains('!!Estimate')].copy()
+df_dp03_pct = df_dp03[df_dp03['Raw_County'].str.contains('!!Percent')].copy()
+
+# Create 'Merge_Name'
+df_dp03_est['Merge_Name'] = df_dp03_est['Raw_County'].str.split('!!').str[0].str.replace(" County, Illinois", "", regex=False).str.lower().str.replace(" ", "").str.replace(".", "", regex=False)
+
+# Dynamically find target columns
+income_col = [col for col in df_dp03_est.columns if 'Median household income' in str(col)][0]
+lfpr_col = [col for col in df_dp03_pct.columns if 'In labor force' in str(col)][0]
+mfg_col = [col for col in df_dp03_pct.columns if 'Manufacturing' in str(col)][0]
+
+# Assemble the final clean economic dataset
+df_clean_dp03 = pd.DataFrame({'Merge_Name': df_dp03_est['Merge_Name'].values})
+df_clean_dp03['Median_Income'] = clean_census_numbers(df_dp03_est[income_col].values)
+df_clean_dp03['Labor_Force_Pct'] = clean_census_numbers(df_dp03_pct[lfpr_col].values)
+df_clean_dp03['Manufacturing_Pct'] = clean_census_numbers(df_dp03_pct[mfg_col].values)
+
+# Save to a new CSV file
+df_clean_dp03.to_csv("derived-data/Cleaned_DP03_Econ.csv", index=False)
+print(f"✅ Saved Cleaned_DP03_Econ.csv successfully! ({len(df_clean_dp03)} counties)")
+```
