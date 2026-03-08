@@ -62,11 +62,11 @@ streamlit run app.py
 (The dashboard will automatically open in your default web browser at https://winter-2026-data-visualization-final-project-kyzeqkck3cwlbiztg.streamlit.app)
 
 - 🖥️ Dashboard Tabs Breakdown
-- 📍 County Profile
+  - 📍 County Profile
 
 Select a specific county to visualize its 7 economic features against the "Illinois State Average" using properly scaled bar charts.
 
-- 📉 Regional Trends & ML
+  - 📉 Regional Trends & ML
 
 Displays the OLS econometric interpretation table (coefficients & significance).
 
@@ -74,11 +74,11 @@ Shows the AI feature importance ranking via a horizontal bar chart.
 
 Analyzes model residual distributions and lists the Top 10 over-predicted and under-predicted counties.
 
-- 🔮 AI Scenario Simulator
+  - 🔮 AI Scenario Simulator
 
 Features 7 dynamic sliders and a real-time gauge chart to test policy interventions (e.g., "If median income increases by $10,000, how much will unemployment drop?").
 
-- 🗺️ Spatial Intelligence Map
+  - 🗺️ Spatial Intelligence Map
 
 Map different data layers (Actual Unemployment, Model Residuals, Income, Manufacturing) onto the geographic space. Supports full statewide overview and deep zoom into the Chicago metro area.
 
