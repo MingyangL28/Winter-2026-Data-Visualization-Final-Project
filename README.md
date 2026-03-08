@@ -65,13 +65,13 @@ streamlit run app.py
   - 📍 County Profile:
     Select a specific county to visualize its 7 economic features against the "Illinois State Average" using properly scaled bar charts.
   - 📉 Regional Trends & ML:
-    Displays the OLS econometric interpretation table (coefficients & significance). Shows the AI feature importance ranking via a horizontal bar chart. Analyzes model residual distributions and lists the Top 10 over-predicted and under-predicted counties.
+    Displays the OLS econometric interpretation table (coefficients & significance).
+    Shows the AI feature importance ranking via a horizontal bar chart.
+    Analyzes model residual distributions and lists the Top 10 over-predicted and under-predicted counties.
   - 🔮 AI Scenario Simulator:
     Features 7 dynamic sliders and a real-time gauge chart to test policy interventions (e.g., "If median income increases by $10,000, how much will unemployment drop?").
   - 🗺️ Spatial Intelligence Map:
     Map different data layers (Actual Unemployment, Model Residuals, Income, Manufacturing) onto the geographic space. Supports full statewide overview and deep zoom into the Chicago metro area.
 
 - ✍️ Author & Acknowledgments:
-Data Sources: U.S. Census Bureau (ACS 5-Year Data), Illinois Department of Labor, and open government datasets.
-
-Built with the Streamlit framework; interactive mapping powered by Plotly.
+Data Sources: U.S. Census Bureau (ACS 5-Year Data), Illinois Department of Labor, and open government datasets. Built with the Streamlit framework; interactive mapping powered by Plotly.
