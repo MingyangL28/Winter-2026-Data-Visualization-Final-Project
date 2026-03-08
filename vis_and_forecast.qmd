@@ -1,5 +1,6 @@
 ---
-title: "Untitled"
+title: "Diagnosing Illinois: An Econometric and Machine Learning View of County Unemployment"
+author: "Mingyang Li"
 format: html
 ---
 
