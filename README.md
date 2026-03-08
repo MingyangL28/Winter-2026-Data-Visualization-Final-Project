@@ -51,12 +51,14 @@ Median_Age: Median age of the population (Years)
 
 2. Install Dependencies: Ensure you have the required Python libraries installed in your environment:
 
-Bash
+```{python}
 pip install pandas numpy streamlit plotly scikit-learn statsmodels requests
+```
 3. Run the Dashboard: Navigate to the project root directory in your terminal/command prompt and run:
 
-Bash
+```{python}
 streamlit run app.py
+```
 (The dashboard will automatically open in your default web browser at http://localhost:8501/)
 
 🖥️ Dashboard Tabs Breakdown
