@@ -102,8 +102,7 @@ The final model uses the following 7 features to predict **2023 County-Level Une
 
 ### 1. Clone the repository
 ```bash
-git clone <your-repo-url>
-cd <repo-folder>
+git clone https://github.com/MingyangL28/Winter-2026-Data-Visualization-Final-Project.git
 ```
 
 ### 2. Install Python dependencies
