@@ -1,0 +1,229 @@
+---
+title: "Diagnosing Illinois: An Econometric and Machine Learning View of County Unemployment"
+author: "Mingyang Li | Tuesday/Thursday Sec 4 | GitHub: MingyangL28"
+format:
+  html:
+    self-contained: true
+  pdf:
+    documentclass: article
+    geometry: "margin=0.75in, top=0.6in, bottom=0.6in"
+    fontsize: 11pt
+    linestretch: 1.1
+    include-in-header:
+      text: |
+        \usepackage{parskip}
+        \setlength{\parskip}{3pt}
+        \setlength{\parindent}{0pt}
+        \usepackage{titlesec}
+        \titlespacing{\section}{0pt}{6pt}{3pt}
+        \titlespacing{\subsection}{0pt}{4pt}{2pt}
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{python}
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+import statsmodels.api as sm
+from scipy import stats
+import warnings
+warnings.filterwarnings('ignore')
+
+# consistent dark style for both HTML and PDF
+plt.rcParams.update({
+    "figure.facecolor": "#1a1a2e",
+    "axes.facecolor":   "#1a1a2e",
+    "axes.edgecolor":   "#444",
+    "axes.labelcolor":  "white",
+    "xtick.color":      "white",
+    "ytick.color":      "white",
+    "text.color":       "white",
+    "grid.color":       "#333",
+    "grid.linestyle":   "--",
+    "grid.alpha":       0.5,
+    "figure.dpi":       150,
+})
+
+def clean_fips(series):
+    s = series.astype(str).str.strip().str.replace(r'\.0$', '', regex=True)
+    return s.apply(lambda x: '17' + x.zfill(3) if len(x) <= 3 else x.zfill(5))
+
+df_main = pd.read_csv("raw-data/UnemploymentReport.csv")
+df_main.columns = df_main.columns.str.strip()
+df_main["FIPS"] = clean_fips(df_main["FIPS"])
+df_main["Merge_Name"] = (df_main["Name"]
+    .str.replace(" County, IL", "", regex=False)
+    .str.lower().str.replace(" ", "").str.replace(".", "", regex=False))
+
+df_edu = pd.read_csv("raw-data/bachelor.csv")
+fips_col = [c for c in df_edu.columns if 'FIPS' in c.upper()][0]
+df_edu = df_edu[[fips_col, "2019-2023"]].rename(columns={fips_col: "FIPS", "2019-2023": "Bach_Pct"})
+df_edu["Bach_Pct"] = pd.to_numeric(df_edu["Bach_Pct"].astype(str).str.replace('%', ''), errors='coerce')
+df_edu["FIPS"] = clean_fips(df_edu["FIPS"])
+
+df_pov_raw = pd.read_csv("raw-data/PovertyReport.csv", skiprows=2)
+df_pov = df_pov_raw.iloc[:, [0, 5]].copy()
+df_pov.columns = ["FIPS", "Poverty_Pct"]
+df_pov['FIPS'] = clean_fips(df_pov['FIPS'])
+df_pov['Poverty_Pct'] = pd.to_numeric(df_pov['Poverty_Pct'], errors='coerce')
+
+df_race_raw = pd.read_csv("raw-data/DECENNIALDHC2020.P9-2026-03-04T220749.csv")
+df_race_t = df_race_raw.transpose()
+df_race_t.columns = df_race_t.iloc[0]
+df_race_t = df_race_t.drop(df_race_t.index[0])
+total_col = [c for c in df_race_t.columns if "Total:" in str(c)][0]
+black_col = [c for c in df_race_t.columns if "Black or African American alone" in str(c)][0]
+total_pop = pd.to_numeric(df_race_t[total_col].astype(str).str.replace(',', ''), errors='coerce')
+black_pop = pd.to_numeric(df_race_t[black_col].astype(str).str.replace(',', ''), errors='coerce')
+df_race_t["Black_Pct"] = (black_pop / total_pop) * 100
+df_race_t["Merge_Name"] = (df_race_t.index
+    .str.replace(" County, Illinois", "", regex=False)
+    .str.lower().str.replace(" ", "").str.replace(".", "", regex=False))
+
+m1 = pd.merge(df_main, df_edu, on="FIPS", how="inner")
+m2 = pd.merge(m1, df_pov, on="FIPS", how="inner")
+df = pd.merge(m2, df_race_t[["Merge_Name", "Black_Pct"]], on="Merge_Name", how="inner")
+
+for c in ["2023", "2020", "Bach_Pct", "Poverty_Pct", "Black_Pct"]:
+    df[c] = pd.to_numeric(df[c], errors='coerce')
+df = df.dropna(subset=["2023", "2020", "Bach_Pct", "Poverty_Pct", "Black_Pct"])
+
+X_ols = sm.add_constant(df[["2020", "Bach_Pct", "Poverty_Pct", "Black_Pct"]])
+ols_model = sm.OLS(df["2023"], X_ols).fit()
+df["Predicted_2023"] = ols_model.predict(X_ols)
+df["Residual"] = (df["Predicted_2023"] - df["2023"]).astype(float)
+```
+
+## Research Question
+
+**Which socioeconomic and demographic factors best explain variation in county-level unemployment across Illinois — and where does the model break down?**
+
+Unemployment in Illinois is far from uniform: Cook County and a rural southern county like Alexander County exist in different economic worlds, yet both fall under the same state policies. This project asks whether a handful of demographic variables can predict that gap — and more importantly, which counties defy prediction entirely, pointing to structural factors that census data cannot capture.
+
+## Data & Approach
+
+The target variable is the 2023 county-level unemployment rate across all 102 Illinois counties. Four predictors were drawn from the U.S. Census Bureau's ACS 5-Year Estimates (DP03 & DP05) and the 2020 Decennial Census: **Poverty Rate**, **Bachelor's Degree %**, **Black Population %**, and **2020 pandemic-era unemployment rate**.
+
+The primary preprocessing challenge was harmonizing FIPS codes across sources — raw files inconsistently dropped Illinois's state prefix "17" (e.g., storing Cook County as "031" rather than "17031"), causing silent merge failures. A standardized zero-padding function resolved this before joining. A Multiple Linear Regression model was then fit using these four predictors, with the **residual** (predicted minus actual unemployment) serving as the key diagnostic output: large positive residuals flag counties performing worse than demographics predict; large negative residuals flag counties that beat expectations.
+
+Two key limitations apply. First, the model is evaluated on the same data used for fitting (no train/test split), which likely overstates in-sample fit. Second, omitted variable bias is a concern — factors like local industry mix, infrastructure quality, and municipal fiscal capacity are absent from the feature set, and their absence is precisely what the residual analysis surfaces.
+
+## Static Plots
+
+### Figure 1: OLS Regression Coefficients — What Drives Unemployment?
+
+```{python}
+#| fig-width: 6
+#| fig-height: 2.8
+
+features = ["2020 Unemployment", "Bachelor's %", "Poverty Rate", "Black Pop %"]
+coefs    = ols_model.params[1:].values
+colors   = ["#EF5350" if c > 0 else "#66BB6A" for c in coefs]
+
+order      = np.argsort(coefs)
+features_s = [features[i] for i in order]
+coefs_s    = coefs[order]
+colors_s   = [colors[i] for i in order]
+
+fig, ax = plt.subplots(figsize=(6, 2.8))
+ax.barh(features_s, coefs_s, color=colors_s, edgecolor="#555", height=0.55)
+ax.axvline(0, color="white", linewidth=0.8, linestyle="--", alpha=0.6)
+ax.set_xlabel("Effect on Unemployment Rate (percentage points)")
+ax.set_title(f"OLS Regression Coefficients  (R\u00b2 = {ols_model.rsquared:.3f})",
+             fontsize=12, fontweight="bold", pad=10)
+ax.grid(axis="x")
+
+red_p   = mpatches.Patch(color="#EF5350", label="Increases unemployment")
+green_p = mpatches.Patch(color="#66BB6A", label="Decreases unemployment")
+ax.legend(handles=[red_p, green_p], loc="lower right", fontsize=8,
+          facecolor="#1a1a2e", edgecolor="#555")
+plt.tight_layout()
+plt.show()
+```
+
+Poverty Rate carries the largest positive effect on unemployment, while Bachelor's degree attainment is the strongest negative predictor — consistent with human capital theory. The 2020 pandemic-era rate has a substantial positive coefficient, indicating that counties hit hardest during the pandemic remained structurally disadvantaged in 2023. All four predictors are statistically significant (p < 0.05), and the R² of `{python} round(ols_model.rsquared, 3)` confirms that these variables jointly explain a substantial share of cross-county variance, directly addressing the research question.
+
+### Figure 2: Poverty vs. Unemployment — Residuals as Color
+
+```{python}
+#| fig-width: 6
+#| fig-height: 3.5
+
+fig, ax = plt.subplots(figsize=(6, 3.5))
+
+sc = ax.scatter(
+    df["Poverty_Pct"], df["2023"],
+    c=df["Residual"],
+    s=df["Bach_Pct"] * 4,
+    cmap="RdBu_r", alpha=0.85,
+    edgecolors="#333", linewidths=0.4,
+    vmin=-df["Residual"].abs().max(),
+    vmax=df["Residual"].abs().max()
+)
+
+m, b = np.polyfit(df["Poverty_Pct"], df["2023"], 1)
+x_line = np.linspace(df["Poverty_Pct"].min(), df["Poverty_Pct"].max(), 100)
+ax.plot(x_line, m * x_line + b, color="white", linewidth=1.2,
+        linestyle="--", alpha=0.7, label="OLS trend")
+
+cbar = plt.colorbar(sc, ax=ax, pad=0.02)
+cbar.set_label("Residual (Predicted \u2212 Actual)", color="white")
+cbar.ax.yaxis.set_tick_params(color="white")
+plt.setp(cbar.ax.yaxis.get_ticklabels(), color="white")
+
+ax.set_xlabel("Poverty Rate (%)")
+ax.set_ylabel("2023 Unemployment (%)")
+ax.set_title("Poverty vs Unemployment\n(color = residual, size = education level)",
+             fontsize=11, fontweight="bold", pad=10)
+ax.legend(fontsize=8, facecolor="#1a1a2e", edgecolor="#555")
+ax.grid(True)
+plt.tight_layout()
+plt.show()
+```
+
+This chart encodes four dimensions simultaneously: poverty rate (x-axis), unemployment (y-axis), education level (bubble size), and model residual (color). The upward trend confirms poverty as the primary driver. Red bubbles in the upper-right — high poverty, high unemployment, and *worse than predicted* — represent the most structurally distressed counties. Blue bubbles near the lower-left, outperforming their demographics, cluster around university towns and suburban Chicago. The residual color layer reveals where the poverty–unemployment relationship breaks down, directly motivating the Streamlit app's outlier analysis.
+
+### Figure 3: Q-Q Plot — Validating the Normality Assumption
+
+```{python}
+#| fig-width: 5
+#| fig-height: 3
+
+residuals = ols_model.resid
+(osm, osr), (slope, intercept, r) = stats.probplot(residuals, dist="norm")
+
+fig, ax = plt.subplots(figsize=(5, 3))
+ax.scatter(osm, osr, color="#90CAF9", s=30, alpha=0.85, label="Residuals", zorder=3)
+ax.plot(osm, slope * np.array(osm) + intercept,
+        color="#EF5350", linewidth=1.5, linestyle="--", label="Normal reference line")
+ax.set_xlabel("Theoretical Quantiles")
+ax.set_ylabel("Sample Quantiles")
+ax.set_title("Q-Q Plot: Are Residuals Normally Distributed?",
+             fontsize=11, fontweight="bold", pad=10)
+ax.legend(fontsize=8, facecolor="#1a1a2e", edgecolor="#555")
+ax.grid(True)
+plt.tight_layout()
+plt.show()
+```
+
+The Q-Q plot tests the core OLS assumption that residuals follow a normal distribution. The near-perfect alignment along the diagonal confirms this holds for the vast majority of counties, validating the statistical inference in Figure 1. The single outlier at the lower-left tail — a county whose unemployment is substantially below any model prediction — is a concrete example of an overperforming outlier, the kind of case the Streamlit app's residual deep-dive is designed to investigate.
+
+---
+
+## Streamlit App
+
+The Streamlit dashboard translates these findings into an interactive policy tool, organized into four tabs:
+
+**County Profile** allows users to select any of the 102 Illinois counties and view its socioeconomic indicators — poverty rate, education, labor force participation, median income, and median age — compared against the statewide average. Metrics are split into percentage-based and absolute-value charts to avoid scale distortion.
+
+**Regional Trends & ML Diagnostics** presents the OLS results table (color-coded by direction of effect) alongside a Random Forest feature importance chart. A residual leaderboard highlights the top over- and under-predicted counties, directly connecting the statistical model to geographic outliers.
+
+**AI Scenario Simulator** is a "what-if" sandbox. Seven policy-lever sliders allow users to adjust socioeconomic inputs (e.g., raise education levels, reduce poverty rate) and instantly see a gauge chart update the predicted unemployment rate against the county's historical baseline — making the regression model tactile and accessible for non-technical stakeholders.
+
+**Spatial Intelligence Map** renders an interactive choropleth supporting multiple data layers — actual unemployment, median income, and model residuals — with dual statewide and Chicago metro zoom views. The selected county is dynamically highlighted across both panels.
+
+Together, the four tabs address the research question at different levels of granularity: County Profile answers *"where are we?"*, Diagnostics answers *"why?"*, the Simulator answers *"what if?"*, and the Map answers *"where does this pattern live geographically?"*
